@@ -1,0 +1,185 @@
+
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>每日体重记录</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 1em; background: #f9f9f9; }
+    input, button, select { font-size: 1em; margin: 0.5em 0; padding: 0.5em; }
+    .record { margin-top: 1em; }
+    canvas { max-width: 100%; margin-top: 1em; background: white; border-radius: 10px; box-shadow: 0 0 5px #ccc; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1em; background: white; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    th { background-color: #f0f0c0; }
+    .actions button { margin: 0 2px; }
+    .stats { margin-top: 1em; background: #fffbe6; padding: 1em; border-radius: 8px; box-shadow: 0 0 5px #ccc; }
+  </style>
+</head>
+<body>
+  <h2>📊 每日体重记录</h2>
+  <label for="height">身高 (cm): </label>
+  <input type="number" id="height" placeholder="如：173" />
+  <label for="date">选择日期: </label>
+  <input type="date" id="date">
+  <label for="weight">体重 (kg): </label>
+  <input type="number" id="weight" step="0.1" placeholder="如：83.5">
+  <button onclick="addRecord()">保存记录</button>
+  <button onclick="exportCSV()">导出 CSV</button>
+  <button onclick="clearAll()">清空所有记录</button>
+
+  <canvas id="chart"></canvas>
+
+  <div class="record">
+    <h3>📅 历史记录</h3>
+    <table id="history">
+      <thead>
+        <tr><th>日期</th><th>体重 (kg)</th><th>市斤</th><th>BMI</th><th>变化 (kg)</th><th>操作</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="stats">
+    <h3>📈 统计信息</h3>
+    <p id="summary"></p>
+  </div>
+
+<script>
+  let records = JSON.parse(localStorage.getItem('weightData') || '[]');
+  let height = parseFloat(localStorage.getItem('userHeight') || '0');
+  const ctx = document.getElementById('chart').getContext('2d');
+  let chart;
+
+  document.getElementById('height').value = height || '';
+
+  document.getElementById('height').addEventListener('change', e => {
+    height = parseFloat(e.target.value);
+    localStorage.setItem('userHeight', height);
+    renderTable();
+  });
+
+  function calcBMI(weight) {
+    return height > 0 ? (weight / Math.pow(height / 100, 2)).toFixed(1) : '-';
+  }
+
+  function renderChart() {
+    if (chart) chart.destroy();
+    const labels = records.map(r => r.date);
+    const data = records.map(r => r.weight);
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: '体重 (kg)',
+          data: data,
+          fill: false,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: false }
+        }
+      }
+    });
+  }
+
+  function renderTable() {
+    const tbody = document.querySelector('#history tbody');
+    tbody.innerHTML = '';
+    records.forEach((r, i) => {
+      const delta = i === 0 ? '-' : (r.weight - records[i - 1].weight).toFixed(1);
+      const jin = (r.weight * 2).toFixed(1);
+      const bmi = calcBMI(r.weight);
+      const tr = `<tr>
+        <td>${r.date}</td>
+        <td>${r.weight}</td>
+        <td>${jin}</td>
+        <td>${bmi}</td>
+        <td>${delta}</td>
+        <td class="actions">
+          <button onclick="editRecord('${r.date}')">编辑</button>
+          <button onclick="deleteRecord('${r.date}')">删除</button>
+        </td>
+      </tr>`;
+      tbody.insertAdjacentHTML('beforeend', tr);
+    });
+    updateStats();
+  }
+
+  function updateStats() {
+    if (records.length === 0) return document.getElementById('summary').innerText = '暂无数据';
+    const weights = records.map(r => r.weight);
+    const min = Math.min(...weights);
+    const max = Math.max(...weights);
+    const avg = (weights.reduce((a, b) => a + b, 0) / weights.length).toFixed(1);
+    const latest = records[records.length - 1];
+    const bmi = calcBMI(latest.weight);
+    document.getElementById('summary').innerText = `最低体重: ${min} kg，最高体重: ${max} kg，平均体重: ${avg} kg，最新 BMI: ${bmi}`;
+  }
+
+  function addRecord() {
+    const w = parseFloat(document.getElementById('weight').value);
+    const d = document.getElementById('date').value || new Date().toISOString().split('T')[0];
+    if (isNaN(w)) return alert('请输入有效体重');
+    const exist = records.find(r => r.date === d);
+    if (exist && !confirm(`${d} 已经记录过，是否覆盖？`)) return;
+    if (exist) records = records.filter(r => r.date !== d);
+    records.push({ date: d, weight: w });
+    records.sort((a, b) => new Date(a.date) - new Date(b.date));
+    localStorage.setItem('weightData', JSON.stringify(records));
+    renderChart();
+    renderTable();
+    document.getElementById('weight').value = '';
+    document.getElementById('date').value = '';
+  }
+
+  function editRecord(date) {
+    const record = records.find(r => r.date === date);
+    if (record) {
+      document.getElementById('date').value = record.date;
+      document.getElementById('weight').value = record.weight;
+    }
+  }
+
+  function deleteRecord(date) {
+    if (confirm(`确定要删除 ${date} 的记录吗？`)) {
+      records = records.filter(r => r.date !== date);
+      localStorage.setItem('weightData', JSON.stringify(records));
+      renderChart();
+      renderTable();
+    }
+  }
+
+  function exportCSV() {
+    const csv = ['日期,体重(kg),市斤,BMI,变化(kg)'];
+    records.forEach((r, i) => {
+      const delta = i === 0 ? '-' : (r.weight - records[i - 1].weight).toFixed(1);
+      const jin = (r.weight * 2).toFixed(1);
+      const bmi = calcBMI(r.weight);
+      csv.push(`${r.date},${r.weight},${jin},${bmi},${delta}`);
+    });
+    const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '体重记录.csv';
+    a.click();
+  }
+
+  function clearAll() {
+    if (confirm('确定要清空所有记录吗？')) {
+      localStorage.removeItem('weightData');
+      location.reload();
+    }
+  }
+
+  renderChart();
+  renderTable();
+</script>
+</body>
+</html>
